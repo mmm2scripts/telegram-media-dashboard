@@ -12,13 +12,16 @@ const MAX_FILES_TOTAL = 500;
 const MAX_FILE_MB = 50;
 const PHOTO_MAX_MB = 10;
 
-const PACK_OPTIONS = [5, 6, 7, 8, 9, 10];
+const PACK_OPTIONS = [
+  5, 6, 7, 8, 9, 10
+];
 
 const CONCURRENT_UPLOADS = 2;
 
 const state = {
   items: [],
-  packSize: DEFAULT_PACK_SIZE,
+  packSize:
+    DEFAULT_PACK_SIZE,
 
   sending: false,
 
@@ -36,20 +39,33 @@ const state = {
 const $ = (id) =>
   document.getElementById(id);
 
-const dropzone = $("dropzone");
-const imageInput = $("imageInput");
-const videoInput = $("videoInput");
+const dropzone =
+  $("dropzone");
 
-const packsEl = $("packs");
+const imageInput =
+  $("imageInput");
 
-const sendBtn = $("sendBtn");
-const clearBtn = $("clearBtn");
+const videoInput =
+  $("videoInput");
 
-const captionEl = $("caption");
+const packsEl =
+  $("packs");
 
-const apiStatus = $("apiStatus");
+const sendBtn =
+  $("sendBtn");
 
-function formatBytes(bytes) {
+const clearBtn =
+  $("clearBtn");
+
+const captionEl =
+  $("caption");
+
+const apiStatus =
+  $("apiStatus");
+
+function formatBytes(
+  bytes
+) {
   if (
     !Number.isFinite(bytes) ||
     bytes <= 0
@@ -64,13 +80,14 @@ function formatBytes(bytes) {
     "GB"
   ];
 
-  const index = Math.min(
-    Math.floor(
-      Math.log(bytes) /
-      Math.log(1024)
-    ),
-    units.length - 1
-  );
+  const index =
+    Math.min(
+      Math.floor(
+        Math.log(bytes) /
+          Math.log(1024)
+      ),
+      units.length - 1
+    );
 
   return `${(
     bytes /
@@ -80,50 +97,49 @@ function formatBytes(bytes) {
   )} ${units[index]}`;
 }
 
-/* =========================
-   MESSAGES
-========================= */
-
-function setMessage(type, text) {
-  const el = $("message");
+function setMessage(
+  type,
+  text
+) {
+  const el =
+    $("message");
 
   if (!text) {
     el.hidden = true;
     el.textContent = "";
-    el.className = "message";
+    el.className =
+      "message";
     return;
   }
 
   el.hidden = false;
   el.textContent = text;
-
   el.className =
     `message ${type || ""}`;
 }
-
-/* =========================
-   API STATUS
-========================= */
 
 function setApiStatus(
   type,
   text
 ) {
-  apiStatus.textContent = text;
+  apiStatus.textContent =
+    text;
 
   apiStatus.className =
     `pill pill-${type}`;
 }
 
-/* =========================
-   OBJECT URLS
-========================= */
-
-function createObjectUrl(file) {
+function createObjectUrl(
+  file
+) {
   const url =
-    URL.createObjectURL(file);
+    URL.createObjectURL(
+      file
+    );
 
-  state.objectUrls.add(url);
+  state.objectUrls.add(
+    url
+  );
 
   return url;
 }
@@ -132,15 +148,13 @@ function revokeObjectUrls() {
   for (
     const url of state.objectUrls
   ) {
-    URL.revokeObjectURL(url);
+    URL.revokeObjectURL(
+      url
+    );
   }
 
   state.objectUrls.clear();
 }
-
-/* =========================
-   STATS
-========================= */
 
 function updateStats() {
   const totalSize =
@@ -154,7 +168,7 @@ function updateStats() {
     state.items.length
       ? Math.ceil(
           state.items.length /
-          state.packSize
+            state.packSize
         )
       : 0;
 
@@ -162,7 +176,9 @@ function updateStats() {
     state.items.length;
 
   $("statSize").textContent =
-    formatBytes(totalSize);
+    formatBytes(
+      totalSize
+    );
 
   $("statPackSize").textContent =
     state.packSize;
@@ -187,10 +203,6 @@ function updateStats() {
     state.sending;
 }
 
-/* =========================
-   PACK SIZE
-========================= */
-
 function renderPackButtons() {
   const container =
     $("packSizes");
@@ -206,7 +218,6 @@ function renderPackButtons() {
       );
 
     button.type = "button";
-
     button.textContent =
       size;
 
@@ -218,7 +229,8 @@ function renderPackButtons() {
     button.addEventListener(
       "click",
       () => {
-        if (state.sending) return;
+        if (state.sending)
+          return;
 
         state.packSize =
           size;
@@ -235,11 +247,9 @@ function renderPackButtons() {
   }
 }
 
-/* =========================
-   PREVIEWS
-========================= */
-
-function createPreviewBox(item) {
+function createPreviewBox(
+  item
+) {
   const box =
     document.createElement(
       "div"
@@ -375,7 +385,6 @@ function loadPreview(
 
   video.muted = true;
   video.playsInline = true;
-
   video.preload =
     "metadata";
 
@@ -422,8 +431,8 @@ function setupPreviewObserver() {
 
   if (
     !(
-      "IntersectionObserver"
-      in window
+      "IntersectionObserver" in
+      window
     )
   ) {
     document
@@ -503,10 +512,6 @@ function setupPreviewObserver() {
     );
 }
 
-/* =========================
-   PACK RENDERING
-========================= */
-
 function renderPacks() {
   if (
     state.previewObserver
@@ -516,14 +521,13 @@ function renderPacks() {
 
   packsEl.replaceChildren();
 
-  if (!state.items.length) {
+  if (!state.items.length)
     return;
-  }
 
   const packCount =
     Math.ceil(
       state.items.length /
-      state.packSize
+        state.packSize
     );
 
   for (
@@ -616,23 +620,19 @@ function renderPacks() {
   setupPreviewObserver();
 }
 
-/* =========================
-   ADD FILES
-========================= */
-
-function addFiles(fileList) {
-  if (state.sending) {
+function addFiles(
+  fileList
+) {
+  if (state.sending)
     return;
-  }
 
   const files =
     Array.from(
       fileList || []
     );
 
-  if (!files.length) {
+  if (!files.length)
     return;
-  }
 
   const problems = [];
 
@@ -729,21 +729,15 @@ function addFiles(fileList) {
   updateStats();
 }
 
-/* =========================
-   CLEAR
-========================= */
-
 function clearAll() {
-  if (state.sending) {
+  if (state.sending)
     return;
-  }
 
   revokeObjectUrls();
 
   state.items = [];
   state.sent = 0;
   state.currentPack = 0;
-
   state.uploadLoaded = 0;
   state.uploadTotal = 0;
 
@@ -764,10 +758,6 @@ function clearAll() {
     ""
   );
 }
-
-/* =========================
-   PACKS
-========================= */
 
 function getPacks() {
   const packs = [];
@@ -807,10 +797,6 @@ function updatePackStatus(
       text;
   }
 }
-
-/* =========================
-   DETAILED ERRORS
-========================= */
 
 function getUploadError(
   xhr,
@@ -877,14 +863,6 @@ function getUploadError(
     ""
   ];
 
-  if (status === 400) {
-    return [
-      ...base,
-      "Server message:",
-      serverMessage
-    ].join("\n");
-  }
-
   if (status === 401) {
     return [
       ...base,
@@ -905,49 +883,6 @@ function getUploadError(
     ].join("\n");
   }
 
-  if (status === 413) {
-    return [
-      ...base,
-      "The upload is too large.",
-      "",
-      `Pack size: ${formatBytes(
-        pack.reduce(
-          (sum, item) =>
-            sum + item.file.size,
-          0
-        )
-      )}`,
-      "",
-      "Server message:",
-      serverMessage
-    ].join("\n");
-  }
-
-  if (status === 429) {
-    return [
-      ...base,
-      "The server is rate limiting uploads.",
-      "",
-      "Wait a moment and try again.",
-      "",
-      "Server message:",
-      serverMessage
-    ].join("\n");
-  }
-
-  if (
-    status === 500 ||
-    status === 501
-  ) {
-    return [
-      ...base,
-      "The bot server returned an internal error.",
-      "",
-      "Server message:",
-      serverMessage
-    ].join("\n");
-  }
-
   if (
     status === 502 ||
     status === 503 ||
@@ -955,9 +890,7 @@ function getUploadError(
   ) {
     return [
       ...base,
-      "The bot server or proxy is unavailable.",
-      "",
-      "Check that the Raven Host server is running.",
+      "The Raven server or proxy is unavailable.",
       "",
       "Server message:",
       serverMessage
@@ -970,10 +903,6 @@ function getUploadError(
     serverMessage
   ].join("\n");
 }
-
-/* =========================
-   SEND ONE PACK
-========================= */
 
 function sendPack(
   pack,
@@ -1035,9 +964,6 @@ function sendPack(
         )}`
       );
 
-      /*
-       * Authenticate with Raven Host.
-       */
       xhr.setRequestHeader(
         "x-internal-key",
         INTERNAL_API_KEY
@@ -1126,7 +1052,7 @@ function sendPack(
               "",
               "The browser could not connect to the Raven server.",
               "",
-              "Check the Raven Host URL and CORS settings."
+              "Check the Raven URL and CORS settings."
             ].join("\n")
           )
         );
@@ -1141,9 +1067,7 @@ function sendPack(
               `Pack: ${packIndex + 1} / ${totalPacks}`,
               `Files: ${pack.length}`,
               "",
-              "The server took too long to respond.",
-              "",
-              "The upload was stopped."
+              "The server took too long to respond."
             ].join("\n")
           )
         );
@@ -1156,16 +1080,9 @@ function sendPack(
   );
 }
 
-/* =========================
-   PROGRESS
-========================= */
-
 function updateUploadProgress() {
-  if (
-    !state.uploadTotal
-  ) {
+  if (!state.uploadTotal)
     return;
-  }
 
   const percent =
     (
@@ -1195,10 +1112,6 @@ function updateUploadProgress() {
     `Uploading ${rounded}%`;
 }
 
-/* =========================
-   SEND ALL
-========================= */
-
 async function sendAll() {
   if (
     state.sending ||
@@ -1207,12 +1120,9 @@ async function sendAll() {
     return;
   }
 
-  state.sending =
-    true;
-
+  state.sending = true;
   state.sent = 0;
   state.currentPack = 0;
-
   state.uploadLoaded = 0;
 
   const packs =
@@ -1225,11 +1135,8 @@ async function sendAll() {
       0
     );
 
-  sendBtn.disabled =
-    true;
-
-  clearBtn.disabled =
-    true;
+  sendBtn.disabled = true;
+  clearBtn.disabled = true;
 
   $("barFill").style.width =
     "0%";
@@ -1339,10 +1246,6 @@ async function sendAll() {
   }
 }
 
-/* =========================
-   HEALTH
-========================= */
-
 async function checkHealth() {
   try {
     const response =
@@ -1350,11 +1253,7 @@ async function checkHealth() {
         `${WORKER_URL}/health`,
         {
           cache:
-            "no-store",
-          headers: {
-            "x-internal-key":
-              INTERNAL_API_KEY
-          }
+            "no-store"
         }
       );
 
@@ -1373,10 +1272,6 @@ async function checkHealth() {
     );
   }
 }
-
-/* =========================
-   EVENTS
-========================= */
 
 $("pickImages").onclick =
   () =>
@@ -1458,14 +1353,8 @@ window.addEventListener(
   revokeObjectUrls
 );
 
-/* =========================
-   START
-========================= */
-
 renderPackButtons();
-
 updateStats();
-
 checkHealth();
 
 setInterval(
