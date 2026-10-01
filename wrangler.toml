@@ -1,0 +1,19 @@
+# One Worker serves BOTH the website (./public) and the API (/api/*).
+# Deploy with:  npx wrangler deploy
+name = "telegram-media-dashboard"
+main = "worker.js"
+compatibility_date = "2025-01-15"
+
+[assets]
+directory = "./public"
+
+[vars]
+# "*" allows any origin. Same-origin requests (the normal setup) are always allowed.
+# Only needed if the site is hosted elsewhere, e.g. "https://my-site.pages.dev"
+ALLOWED_ORIGIN = "*"
+MAX_BODY_MB = "95"
+RATE_LIMIT_PER_MINUTE = "60"
+
+# Secrets are NOT stored here. Set them with:
+#   npx wrangler secret put BOT_SERVER_URL
+#   npx wrangler secret put INTERNAL_API_KEY
