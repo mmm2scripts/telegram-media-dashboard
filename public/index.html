@@ -7,31 +7,73 @@
   <title>Telegram Media</title>
   <link rel="stylesheet" href="styles.css">
 </head>
+
 <body>
   <header class="top">
     <div>
       <h1>Telegram Media</h1>
       <p class="muted">Upload and send media to Telegram</p>
     </div>
-    <span id="apiStatus" class="pill pill-wait" role="status">Checking…</span>
+
+    <span id="apiStatus" class="pill pill-wait">
+      CHECKING
+    </span>
   </header>
 
   <main>
-    <section id="dropzone" class="dropzone" tabindex="0" aria-label="Add files">
+    <section
+      id="dropzone"
+      class="dropzone"
+      tabindex="0"
+      aria-label="Add files"
+    >
       <div class="upload-icon">+</div>
+
       <h2>Drop your media here</h2>
-      <p class="muted">Images and videos</p>
+
+      <p class="muted">
+        Images and videos
+      </p>
 
       <div class="row">
-        <button type="button" class="btn" id="pickImages">Photos</button>
-        <button type="button" class="btn" id="pickVideos">Videos</button>
+        <button
+          type="button"
+          class="btn"
+          id="pickImages"
+        >
+          Photos
+        </button>
+
+        <button
+          type="button"
+          class="btn"
+          id="pickVideos"
+        >
+          Videos
+        </button>
       </div>
 
-      <input id="imageInput" type="file" accept="image/*" multiple hidden>
-      <input id="videoInput" type="file" accept="video/*" multiple hidden>
+      <input
+        id="imageInput"
+        type="file"
+        accept="image/*"
+        multiple
+        hidden
+      >
+
+      <input
+        id="videoInput"
+        type="file"
+        accept="video/*"
+        multiple
+        hidden
+      >
     </section>
 
-    <section class="stats" aria-label="Summary">
+    <section
+      class="stats"
+      aria-label="Upload summary"
+    >
       <div>
         <span class="k">Files</span>
         <strong id="statFiles">0</strong>
@@ -65,12 +107,26 @@
 
     <section class="panel">
       <div class="field">
-        <span class="label" id="packLabel">Files per pack</span>
-        <div id="packSizes" class="seg" role="group" aria-labelledby="packLabel"></div>
+        <span
+          class="label"
+          id="packLabel"
+        >
+          Files per pack
+        </span>
+
+        <div
+          id="packSizes"
+          class="seg"
+          role="group"
+          aria-labelledby="packLabel"
+        ></div>
       </div>
 
       <div class="field">
-        <label class="label" for="caption">
+        <label
+          class="label"
+          for="caption"
+        >
           Caption
         </label>
 
@@ -78,23 +134,48 @@
           id="caption"
           rows="2"
           maxlength="1024"
-          placeholder="Optional caption…"
+          placeholder="Optional caption..."
         ></textarea>
       </div>
     </section>
 
-    <section id="packs" class="packs" aria-live="polite"></section>
+    <section
+      id="packs"
+      class="packs"
+      aria-live="polite"
+    ></section>
 
     <section class="panel">
-      <div class="bar" aria-hidden="true">
-        <div id="barFill" class="bar-fill"></div>
+      <div
+        class="progress-header"
+      >
+        <span>Upload progress</span>
+        <strong id="progressPercent">0%</strong>
       </div>
 
-      <p id="progressText" class="muted">
-        Nothing is being sent.
+      <div
+        class="bar"
+        aria-hidden="true"
+      >
+        <div
+          id="barFill"
+          class="bar-fill"
+        ></div>
+      </div>
+
+      <p
+        id="progressText"
+        class="muted"
+      >
+        Ready to upload.
       </p>
 
-      <p id="message" class="message" role="status" hidden></p>
+      <p
+        id="message"
+        class="message"
+        role="alert"
+        hidden
+      ></p>
 
       <div class="row actions">
         <button
