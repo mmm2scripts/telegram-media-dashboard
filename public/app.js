@@ -1,6 +1,8 @@
 "use strict";
 
-const WORKER_URL = "";
+const WORKER_URL = "https://2691-9d6111e000.app.ravenhost.space";
+
+const INTERNAL_API_KEY = "PASTE_YOUR_INTERNAL_API_KEY_HERE";
 const DEFAULT_PACK_SIZE = 10;
 
 const MAX_FILES_TOTAL = 500;
