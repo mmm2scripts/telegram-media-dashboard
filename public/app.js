@@ -1,8 +1,11 @@
 "use strict";
 
-const WORKER_URL = "https://2691-9d6111e000.app.ravenhost.space";
+const WORKER_URL =
+  "https://2691-9d6111e000.app.ravenhost.space";
 
-const INTERNAL_API_KEY = "PASTE_YOUR_INTERNAL_API_KEY_HERE";
+const INTERNAL_API_KEY =
+  "RavenTelegramMedia_2026_9fK7mQ2xL8pN4vR6";
+
 const DEFAULT_PACK_SIZE = 10;
 
 const MAX_FILES_TOTAL = 500;
@@ -11,10 +14,6 @@ const PHOTO_MAX_MB = 10;
 
 const PACK_OPTIONS = [5, 6, 7, 8, 9, 10];
 
-/*
- * Two packs can upload at the same time.
- * Increase carefully if the Raven server can handle it.
- */
 const CONCURRENT_UPLOADS = 2;
 
 const state = {
@@ -996,21 +995,6 @@ function sendPack(
         );
       }
 
-      /*
-       * IMPORTANT
-       *
-       * Always send the selected
-       * pack size.
-       *
-       * If selected size = 10
-       * and the final pack has 3 files,
-       * we STILL send packSize=10.
-       *
-       * This prevents:
-       *
-       * "pack size must be an integer from 5-10"
-       */
-
       form.append(
         "packSize",
         String(
@@ -1049,6 +1033,14 @@ function sendPack(
         `${WORKER_URL}/api/send-media?packSize=${encodeURIComponent(
           state.packSize
         )}`
+      );
+
+      /*
+       * Authenticate with Raven Host.
+       */
+      xhr.setRequestHeader(
+        "x-internal-key",
+        INTERNAL_API_KEY
       );
 
       xhr.responseType =
@@ -1132,9 +1124,9 @@ function sendPack(
               `Pack: ${packIndex + 1} / ${totalPacks}`,
               `Files: ${pack.length}`,
               "",
-              "The browser could not connect to the upload server.",
+              "The browser could not connect to the Raven server.",
               "",
-              "Check that the Raven Host server is online."
+              "Check the Raven Host URL and CORS settings."
             ].join("\n")
           )
         );
@@ -1355,10 +1347,14 @@ async function checkHealth() {
   try {
     const response =
       await fetch(
-        `${WORKER_URL}/api/health`,
+        `${WORKER_URL}/health`,
         {
           cache:
-            "no-store"
+            "no-store",
+          headers: {
+            "x-internal-key":
+              INTERNAL_API_KEY
+          }
         }
       );
 
