@@ -7,7 +7,7 @@ const MAX_FILES_TOTAL = 500;
 const MAX_FILE_MB = 50;
 const PHOTO_MAX_MB = 10;
 
-const PACK_OPTIONS = [5, 10];
+const PACK_OPTIONS = [5, 6, 7, 8, 9, 10];
 const CONCURRENT_UPLOADS = 2;
 
 const state = {
@@ -53,6 +53,7 @@ function setMessage(type, text) {
   if (!text) {
     el.hidden = true;
     el.textContent = "";
+    el.className = "message";
     return;
   }
 
@@ -94,9 +95,11 @@ function updateStats() {
   $("statSize").textContent = formatBytes(totalSize);
   $("statPackSize").textContent = state.packSize;
   $("statPacks").textContent = packCount;
+
   $("statCurrent").textContent = state.currentPack
     ? `${state.currentPack} / ${packCount}`
     : "–";
+
   $("statSent").textContent =
     `${state.sent} / ${state.items.length}`;
 
@@ -123,6 +126,7 @@ function renderPackButtons() {
       if (state.sending) return;
 
       state.packSize = size;
+
       renderPackButtons();
       renderPacks();
       updateStats();
@@ -179,7 +183,7 @@ function loadPreview(box, item) {
     img.decoding = "async";
 
     img.onload = () => {
-      placeholder?.remove();
+      if (placeholder) placeholder.remove();
     };
 
     img.onerror = () => {
@@ -207,7 +211,19 @@ function loadPreview(box, item) {
 
   video.addEventListener(
     "loadeddata",
-    () => placeholder?.remove(),
+    () => {
+      if (placeholder) placeholder.remove();
+    },
+    { once: true }
+  );
+
+  video.addEventListener(
+    "error",
+    () => {
+      if (placeholder) {
+        placeholder.textContent = "Preview unavailable";
+      }
+    },
     { once: true }
   );
 
@@ -257,7 +273,7 @@ function setupPreviewObserver() {
         }
       },
       {
-        rootMargin: "400px 0px"
+        rootMargin: "300px 0px"
       }
     );
 
@@ -308,7 +324,9 @@ function renderPacks() {
     itemsEl.className = "pack-items";
 
     for (const item of items) {
-      itemsEl.appendChild(createPreviewBox(item));
+      itemsEl.appendChild(
+        createPreviewBox(item)
+      );
     }
 
     pack.append(head, itemsEl);
@@ -322,6 +340,7 @@ function addFiles(fileList) {
   if (state.sending) return;
 
   const files = Array.from(fileList || []);
+
   if (!files.length) return;
 
   const problems = [];
@@ -338,13 +357,16 @@ function addFiles(fileList) {
       !file.type.startsWith("image/") &&
       !file.type.startsWith("video/")
     ) {
-      problems.push(`${file.name}: unsupported file type.`);
+      problems.push(
+        `${file.name}: unsupported file type.`
+      );
       continue;
     }
 
-    const maxMb = file.type.startsWith("image/")
-      ? PHOTO_MAX_MB
-      : MAX_FILE_MB;
+    const maxMb =
+      file.type.startsWith("image/")
+        ? PHOTO_MAX_MB
+        : MAX_FILE_MB;
 
     if (file.size > maxMb * 1024 * 1024) {
       problems.push(
@@ -354,13 +376,14 @@ function addFiles(fileList) {
     }
 
     state.items.push({
-      id: crypto.randomUUID
-        ? crypto.randomUUID()
-        : `${Date.now()}-${Math.random()}`,
+      id:
+        crypto.randomUUID?.() ||
+        `${Date.now()}-${Math.random()}`,
       file,
-      type: file.type.startsWith("video/")
-        ? "video"
-        : "image",
+      type:
+        file.type.startsWith("video/")
+          ? "video"
+          : "image",
       url: createObjectUrl(file)
     });
   }
@@ -389,6 +412,8 @@ function clearAll() {
   state.items = [];
   state.sent = 0;
   state.currentPack = 0;
+  state.uploadLoaded = 0;
+  state.uploadTotal = 0;
 
   renderPacks();
   updateStats();
@@ -425,14 +450,20 @@ function updatePackStatus(index, text) {
     packsEl.querySelectorAll(".pack");
 
   const status =
-    packs[index]?.querySelector(".pack-status");
+    packs[index]?.querySelector(
+      ".pack-status"
+    );
 
   if (status) {
     status.textContent = text;
   }
 }
 
-function sendPack(pack, packIndex, totalPacks) {
+function sendPack(
+  pack,
+  packIndex,
+  totalPacks
+) {
   return new Promise((resolve, reject) => {
     const form = new FormData();
 
@@ -444,9 +475,24 @@ function sendPack(pack, packIndex, totalPacks) {
       );
     }
 
+    /*
+      IMPORTANT:
+      Always send the SELECTED pack size.
+
+      Example:
+      Selected = 10
+      Final pack = 3 files
+
+      Query remains:
+      packSize=10
+
+      This prevents the:
+      "pack size must be an integer from 5-10"
+      error.
+    */
     form.append(
       "packSize",
-      String(pack.length)
+      String(state.packSize)
     );
 
     form.append(
@@ -466,37 +512,47 @@ function sendPack(pack, packIndex, totalPacks) {
       );
     }
 
-    const xhr = new XMLHttpRequest();
+    const xhr =
+      new XMLHttpRequest();
 
     xhr.open(
       "POST",
       `${WORKER_URL}/api/send-media?packSize=${encodeURIComponent(
-        pack.length
+        state.packSize
       )}`
     );
 
     xhr.responseType = "json";
     xhr.timeout = 10 * 60 * 1000;
 
+    xhr._lastLoaded = 0;
+
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
 
       state.uploadLoaded +=
         event.loaded -
-        (xhr._lastLoaded || 0);
+        xhr._lastLoaded;
 
-      xhr._lastLoaded = event.loaded;
+      xhr._lastLoaded =
+        event.loaded;
 
       updateUploadProgress();
     };
 
     xhr.onload = () => {
-      let response = xhr.response;
+      let response =
+        xhr.response;
 
-      if (!response && xhr.responseText) {
+      if (
+        !response &&
+        xhr.responseText
+      ) {
         try {
           response =
-            JSON.parse(xhr.responseText);
+            JSON.parse(
+              xhr.responseText
+            );
         } catch {
           response = null;
         }
@@ -523,13 +579,17 @@ function sendPack(pack, packIndex, totalPacks) {
 
     xhr.onerror = () => {
       reject(
-        new Error("Network error while uploading.")
+        new Error(
+          "Network error while uploading."
+        )
       );
     };
 
     xhr.ontimeout = () => {
       reject(
-        new Error("Upload timed out.")
+        new Error(
+          "Upload timed out."
+        )
       );
     };
 
@@ -545,17 +605,17 @@ function updateUploadProgress() {
       state.uploadTotal) *
     100;
 
-  const safePercent =
+  const safe =
     Math.max(
       0,
       Math.min(100, percent)
     );
 
   $("barFill").style.width =
-    `${safePercent}%`;
+    `${safe}%`;
 
   $("progressText").textContent =
-    `Uploading ${Math.round(safePercent)}%`;
+    `Uploading ${Math.round(safe)}%`;
 }
 
 async function sendAll() {
@@ -574,7 +634,7 @@ async function sendAll() {
   const packs = getPacks();
 
   state.uploadTotal =
-    packs.flat().reduce(
+    state.items.reduce(
       (sum, item) =>
         sum + item.file.size,
       0
@@ -598,7 +658,8 @@ async function sendAll() {
           return;
         }
 
-        state.currentPack = index + 1;
+        state.currentPack =
+          index + 1;
 
         updateStats();
 
@@ -613,7 +674,8 @@ async function sendAll() {
           packs.length
         );
 
-        state.sent += packs[index].length;
+        state.sent +=
+          packs[index].length;
 
         updatePackStatus(
           index,
@@ -624,10 +686,11 @@ async function sendAll() {
       }
     }
 
-    const workers = Math.min(
-      CONCURRENT_UPLOADS,
-      packs.length
-    );
+    const workers =
+      Math.min(
+        CONCURRENT_UPLOADS,
+        packs.length
+      );
 
     await Promise.all(
       Array.from(
@@ -636,7 +699,8 @@ async function sendAll() {
       )
     );
 
-    $("barFill").style.width = "100%";
+    $("barFill").style.width =
+      "100%";
 
     $("progressText").textContent =
       `Uploaded ${state.sent} files`;
@@ -646,14 +710,14 @@ async function sendAll() {
       "All files were uploaded successfully."
     );
   } catch (error) {
-    $("progressText").textContent =
-      `Upload stopped — ${state.sent} files sent`;
-
     setMessage(
       "error",
       error?.message ||
-      "Upload failed."
+        "Upload failed."
     );
+
+    $("progressText").textContent =
+      `Upload stopped — ${state.sent} files sent`;
   } finally {
     state.sending = false;
     updateStats();
@@ -674,17 +738,23 @@ async function checkHealth() {
       throw new Error();
     }
 
-    setApiStatus("ok", "ONLINE");
+    setApiStatus(
+      "ok",
+      "ONLINE"
+    );
   } catch {
-    setApiStatus("error", "OFFLINE");
+    setApiStatus(
+      "error",
+      "OFFLINE"
+    );
   }
 }
 
-$("pickImages").onclick = () =>
-  imageInput.click();
+$("pickImages").onclick =
+  () => imageInput.click();
 
-$("pickVideos").onclick = () =>
-  videoInput.click();
+$("pickVideos").onclick =
+  () => videoInput.click();
 
 imageInput.onchange = () => {
   addFiles(imageInput.files);
@@ -702,13 +772,21 @@ dropzone.ondragover = (event) => {
 };
 
 dropzone.ondragleave = () => {
-  dropzone.classList.remove("dragging");
+  dropzone.classList.remove(
+    "dragging"
+  );
 };
 
 dropzone.ondrop = (event) => {
   event.preventDefault();
-  dropzone.classList.remove("dragging");
-  addFiles(event.dataTransfer.files);
+
+  dropzone.classList.remove(
+    "dragging"
+  );
+
+  addFiles(
+    event.dataTransfer.files
+  );
 };
 
 sendBtn.onclick = sendAll;
@@ -723,4 +801,7 @@ renderPackButtons();
 updateStats();
 checkHealth();
 
-setInterval(checkHealth, 30000);
+setInterval(
+  checkHealth,
+  30000
+);
