@@ -6,9 +6,9 @@ const DEFAULT_PACK_SIZE = 10;
 const MAX_FILES_TOTAL = 500;
 const MAX_FILE_MB = 50;
 const PHOTO_MAX_MB = 10;
-const MAX_REQUEST_MB = 95;
 
 const PACK_OPTIONS = [5, 10];
+const CONCURRENT_UPLOADS = 2;
 
 const state = {
   items: [],
@@ -17,7 +17,9 @@ const state = {
   sent: 0,
   currentPack: 0,
   objectUrls: new Set(),
-  previewObserver: null
+  previewObserver: null,
+  uploadLoaded: 0,
+  uploadTotal: 0
 };
 
 const $ = (id) => document.getElementById(id);
@@ -51,7 +53,6 @@ function setMessage(type, text) {
   if (!text) {
     el.hidden = true;
     el.textContent = "";
-    el.className = "message";
     return;
   }
 
@@ -96,28 +97,14 @@ function updateStats() {
   $("statCurrent").textContent = state.currentPack
     ? `${state.currentPack} / ${packCount}`
     : "–";
-  $("statSent").textContent = `${state.sent} / ${state.items.length}`;
+  $("statSent").textContent =
+    `${state.sent} / ${state.items.length}`;
 
-  sendBtn.disabled = state.items.length === 0 || state.sending;
-  clearBtn.disabled = state.items.length === 0 || state.sending;
-}
+  sendBtn.disabled =
+    state.items.length === 0 || state.sending;
 
-function createPackButton(size) {
-  const button = document.createElement("button");
-  button.type = "button";
-  button.textContent = size;
-  button.className = size === state.packSize ? "active" : "";
-
-  button.addEventListener("click", () => {
-    if (state.sending) return;
-
-    state.packSize = size;
-    renderPackButtons();
-    renderPacks();
-    updateStats();
-  });
-
-  return button;
+  clearBtn.disabled =
+    state.items.length === 0 || state.sending;
 }
 
 function renderPackButtons() {
@@ -125,26 +112,43 @@ function renderPackButtons() {
   container.replaceChildren();
 
   for (const size of PACK_OPTIONS) {
-    container.appendChild(createPackButton(size));
+    const button = document.createElement("button");
+
+    button.type = "button";
+    button.textContent = size;
+    button.className =
+      size === state.packSize ? "active" : "";
+
+    button.addEventListener("click", () => {
+      if (state.sending) return;
+
+      state.packSize = size;
+      renderPackButtons();
+      renderPacks();
+      updateStats();
+    });
+
+    container.appendChild(button);
   }
 }
 
 function createPreviewBox(item) {
   const box = document.createElement("div");
+
   box.className = "media-card";
   box.dataset.previewId = item.id;
 
   const placeholder = document.createElement("div");
   placeholder.className = "preview-placeholder";
-  placeholder.textContent = item.type === "video"
-    ? "Video"
-    : "Image";
+  placeholder.textContent =
+    item.type === "video" ? "VIDEO" : "IMAGE";
 
   box.appendChild(placeholder);
 
   const badge = document.createElement("div");
   badge.className = "type-badge";
-  badge.textContent = item.type === "video" ? "VIDEO" : "PHOTO";
+  badge.textContent =
+    item.type === "video" ? "VIDEO" : "PHOTO";
 
   box.appendChild(badge);
 
@@ -162,15 +166,17 @@ function loadPreview(box, item) {
 
   box.dataset.loaded = "true";
 
-  const placeholder = box.querySelector(".preview-placeholder");
-  const badge = box.querySelector(".type-badge");
+  const placeholder =
+    box.querySelector(".preview-placeholder");
+
+  const badge =
+    box.querySelector(".type-badge");
 
   if (item.type === "image") {
     const img = new Image();
 
     img.alt = item.file.name;
     img.decoding = "async";
-    img.loading = "lazy";
 
     img.onload = () => {
       placeholder?.remove();
@@ -201,24 +207,11 @@ function loadPreview(box, item) {
 
   video.addEventListener(
     "loadeddata",
-    () => {
-      placeholder?.remove();
-    },
-    { once: true }
-  );
-
-  video.addEventListener(
-    "error",
-    () => {
-      if (placeholder) {
-        placeholder.textContent = "Preview unavailable";
-      }
-    },
+    () => placeholder?.remove(),
     { once: true }
   );
 
   video.src = item.url;
-  video.currentTime = 0.1;
 
   if (badge) {
     box.insertBefore(video, badge);
@@ -237,43 +230,42 @@ function setupPreviewObserver() {
       .querySelectorAll(".media-card[data-preview-id]")
       .forEach((box) => {
         const item = state.items.find(
-          (entry) => entry.id === box.dataset.previewId
+          (x) => x.id === box.dataset.previewId
         );
 
-        if (item) {
-          loadPreview(box, item);
-        }
+        if (item) loadPreview(box, item);
       });
 
     return;
   }
 
-  state.previewObserver = new IntersectionObserver(
-    (entries, observer) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
+  state.previewObserver =
+    new IntersectionObserver(
+      (entries, observer) => {
+        for (const entry of entries) {
+          if (!entry.isIntersecting) continue;
 
-        const box = entry.target;
+          const box = entry.target;
 
-        const item = state.items.find(
-          (entryItem) => entryItem.id === box.dataset.previewId
-        );
+          const item = state.items.find(
+            (x) => x.id === box.dataset.previewId
+          );
 
-        if (item) {
-          loadPreview(box, item);
+          if (item) loadPreview(box, item);
+
+          observer.unobserve(box);
         }
-
-        observer.unobserve(box);
+      },
+      {
+        rootMargin: "400px 0px"
       }
-    },
-    {
-      rootMargin: "300px 0px"
-    }
-  );
+    );
 
   document
     .querySelectorAll(".media-card[data-preview-id]")
-    .forEach((box) => state.previewObserver.observe(box));
+    .forEach((box) =>
+      state.previewObserver.observe(box)
+    );
 }
 
 function renderPacks() {
@@ -283,19 +275,16 @@ function renderPacks() {
 
   packsEl.replaceChildren();
 
-  if (!state.items.length) {
-    return;
-  }
+  if (!state.items.length) return;
 
   const packCount = Math.ceil(
     state.items.length / state.packSize
   );
 
-  for (let packIndex = 0; packIndex < packCount; packIndex++) {
-    const start = packIndex * state.packSize;
+  for (let i = 0; i < packCount; i++) {
     const items = state.items.slice(
-      start,
-      start + state.packSize
+      i * state.packSize,
+      (i + 1) * state.packSize
     );
 
     const pack = document.createElement("article");
@@ -306,16 +295,14 @@ function renderPacks() {
 
     const title = document.createElement("span");
     title.className = "pack-title";
-    title.textContent = `Pack ${packIndex + 1}`;
+    title.textContent = `PACK ${i + 1}`;
 
     const status = document.createElement("span");
     status.className = "pack-status";
-    status.textContent = `${items.length} file${
-      items.length === 1 ? "" : "s"
-    }`;
+    status.textContent =
+      `${items.length} FILE${items.length === 1 ? "" : "S"}`;
 
-    head.appendChild(title);
-    head.appendChild(status);
+    head.append(title, status);
 
     const itemsEl = document.createElement("div");
     itemsEl.className = "pack-items";
@@ -324,40 +311,33 @@ function renderPacks() {
       itemsEl.appendChild(createPreviewBox(item));
     }
 
-    pack.appendChild(head);
-    pack.appendChild(itemsEl);
+    pack.append(head, itemsEl);
     packsEl.appendChild(pack);
   }
 
   setupPreviewObserver();
 }
 
-function isAllowedFile(file) {
-  return (
-    file &&
-    (
-      file.type.startsWith("image/") ||
-      file.type.startsWith("video/")
-    )
-  );
-}
-
 function addFiles(fileList) {
   if (state.sending) return;
 
   const files = Array.from(fileList || []);
-
   if (!files.length) return;
 
   const problems = [];
 
   for (const file of files) {
     if (state.items.length >= MAX_FILES_TOTAL) {
-      problems.push(`Maximum of ${MAX_FILES_TOTAL} files reached.`);
+      problems.push(
+        `Maximum of ${MAX_FILES_TOTAL} files reached.`
+      );
       break;
     }
 
-    if (!isAllowedFile(file)) {
+    if (
+      !file.type.startsWith("image/") &&
+      !file.type.startsWith("video/")
+    ) {
       problems.push(`${file.name}: unsupported file type.`);
       continue;
     }
@@ -373,7 +353,7 @@ function addFiles(fileList) {
       continue;
     }
 
-    const item = {
+    state.items.push({
       id: crypto.randomUUID
         ? crypto.randomUUID()
         : `${Date.now()}-${Math.random()}`,
@@ -382,10 +362,11 @@ function addFiles(fileList) {
         ? "video"
         : "image",
       url: createObjectUrl(file)
-    };
-
-    state.items.push(item);
+    });
   }
+
+  state.sent = 0;
+  state.currentPack = 0;
 
   if (problems.length) {
     setMessage(
@@ -395,9 +376,6 @@ function addFiles(fileList) {
   } else {
     setMessage("", "");
   }
-
-  state.sent = 0;
-  state.currentPack = 0;
 
   renderPacks();
   updateStats();
@@ -416,7 +394,7 @@ function clearAll() {
   updateStats();
 
   $("progressText").textContent =
-    "Nothing is being sent.";
+    "Ready to upload.";
 
   $("barFill").style.width = "0%";
 
@@ -432,23 +410,25 @@ function getPacks() {
     i += state.packSize
   ) {
     packs.push(
-      state.items.slice(i, i + state.packSize)
+      state.items.slice(
+        i,
+        i + state.packSize
+      )
     );
   }
 
   return packs;
 }
 
-function updatePackStatus(packIndex, text) {
-  const packs = packsEl.querySelectorAll(".pack");
+function updatePackStatus(index, text) {
+  const packs =
+    packsEl.querySelectorAll(".pack");
 
-  if (packs[packIndex]) {
-    const status =
-      packs[packIndex].querySelector(".pack-status");
+  const status =
+    packs[index]?.querySelector(".pack-status");
 
-    if (status) {
-      status.textContent = text;
-    }
+  if (status) {
+    status.textContent = text;
   }
 }
 
@@ -457,15 +437,33 @@ function sendPack(pack, packIndex, totalPacks) {
     const form = new FormData();
 
     for (const item of pack) {
-      form.append("files", item.file, item.file.name);
+      form.append(
+        "files",
+        item.file,
+        item.file.name
+      );
     }
 
-    form.append("packSize", String(pack.length));
-    form.append("packIndex", String(packIndex + 1));
-    form.append("totalPacks", String(totalPacks));
+    form.append(
+      "packSize",
+      String(pack.length)
+    );
 
-    if (packIndex === 0 || captionEl.value.trim()) {
-      form.append("caption", captionEl.value.trim());
+    form.append(
+      "packIndex",
+      String(packIndex + 1)
+    );
+
+    form.append(
+      "totalPacks",
+      String(totalPacks)
+    );
+
+    if (packIndex === 0) {
+      form.append(
+        "caption",
+        captionEl.value.trim()
+      );
     }
 
     const xhr = new XMLHttpRequest();
@@ -478,27 +476,18 @@ function sendPack(pack, packIndex, totalPacks) {
     );
 
     xhr.responseType = "json";
+    xhr.timeout = 10 * 60 * 1000;
 
     xhr.upload.onprogress = (event) => {
       if (!event.lengthComputable) return;
 
-      const packProgress =
-        event.loaded / event.total;
+      state.uploadLoaded +=
+        event.loaded -
+        (xhr._lastLoaded || 0);
 
-      const completedBefore = packIndex * state.packSize;
+      xhr._lastLoaded = event.loaded;
 
-      const overall =
-        (
-          (completedBefore +
-            packProgress * pack.length) /
-          state.items.length
-        ) * 100;
-
-      $("barFill").style.width =
-        `${Math.min(100, overall)}%`;
-
-      $("progressText").textContent =
-        `Sending pack ${packIndex + 1} of ${totalPacks}…`;
+      updateUploadProgress();
     };
 
     xhr.onload = () => {
@@ -506,7 +495,8 @@ function sendPack(pack, packIndex, totalPacks) {
 
       if (!response && xhr.responseText) {
         try {
-          response = JSON.parse(xhr.responseText);
+          response =
+            JSON.parse(xhr.responseText);
         } catch {
           response = null;
         }
@@ -532,17 +522,40 @@ function sendPack(pack, packIndex, totalPacks) {
     };
 
     xhr.onerror = () => {
-      reject(new Error("Network error while sending."));
+      reject(
+        new Error("Network error while uploading.")
+      );
     };
 
     xhr.ontimeout = () => {
-      reject(new Error("Request timed out."));
+      reject(
+        new Error("Upload timed out.")
+      );
     };
-
-    xhr.timeout = 10 * 60 * 1000;
 
     xhr.send(form);
   });
+}
+
+function updateUploadProgress() {
+  if (!state.uploadTotal) return;
+
+  const percent =
+    (state.uploadLoaded /
+      state.uploadTotal) *
+    100;
+
+  const safePercent =
+    Math.max(
+      0,
+      Math.min(100, percent)
+    );
+
+  $("barFill").style.width =
+    `${safePercent}%`;
+
+  $("progressText").textContent =
+    `Uploading ${Math.round(safePercent)}%`;
 }
 
 async function sendAll() {
@@ -556,65 +569,90 @@ async function sendAll() {
   state.sending = true;
   state.sent = 0;
   state.currentPack = 0;
+  state.uploadLoaded = 0;
+
+  const packs = getPacks();
+
+  state.uploadTotal =
+    packs.flat().reduce(
+      (sum, item) =>
+        sum + item.file.size,
+      0
+    );
 
   sendBtn.disabled = true;
   clearBtn.disabled = true;
 
+  $("barFill").style.width = "0%";
+
   setMessage("", "");
 
-  const packs = getPacks();
-
   try {
-    for (
-      let index = 0;
-      index < packs.length;
-      index++
-    ) {
-      state.currentPack = index + 1;
+    let nextPack = 0;
 
-      updateStats();
-      updatePackStatus(
-        index,
-        "Sending…"
-      );
+    async function worker() {
+      while (true) {
+        const index = nextPack++;
 
-      await sendPack(
-        packs[index],
-        index,
-        packs.length
-      );
+        if (index >= packs.length) {
+          return;
+        }
 
-      state.sent += packs[index].length;
+        state.currentPack = index + 1;
 
-      updatePackStatus(
-        index,
-        "Sent"
-      );
+        updateStats();
 
-      updateStats();
+        updatePackStatus(
+          index,
+          "UPLOADING"
+        );
 
-      const progress =
-        (state.sent / state.items.length) * 100;
+        await sendPack(
+          packs[index],
+          index,
+          packs.length
+        );
 
-      $("barFill").style.width =
-        `${progress}%`;
+        state.sent += packs[index].length;
+
+        updatePackStatus(
+          index,
+          "SENT"
+        );
+
+        updateStats();
+      }
     }
 
+    const workers = Math.min(
+      CONCURRENT_UPLOADS,
+      packs.length
+    );
+
+    await Promise.all(
+      Array.from(
+        { length: workers },
+        () => worker()
+      )
+    );
+
+    $("barFill").style.width = "100%";
+
     $("progressText").textContent =
-      `Sent ${state.sent} files successfully.`;
+      `Uploaded ${state.sent} files`;
 
     setMessage(
       "success",
-      "All files were sent successfully."
+      "All files were uploaded successfully."
     );
   } catch (error) {
     $("progressText").textContent =
-      `Stopped after ${state.sent} files.`;
+      `Upload stopped — ${state.sent} files sent`;
 
     setMessage(
       "error",
       error?.message ||
-        "Something went wrong while sending."
+      "Upload failed."
     );
   } finally {
     state.sending = false;
@@ -624,97 +662,57 @@ async function sendAll() {
 
 async function checkHealth() {
   try {
-    const response = await fetch(
-      `${WORKER_URL}/api/health`,
-      {
-        method: "GET",
-        cache: "no-store"
-      }
-    );
+    const response =
+      await fetch(
+        `${WORKER_URL}/api/health`,
+        {
+          cache: "no-store"
+        }
+      );
 
     if (!response.ok) {
       throw new Error();
     }
 
-    setApiStatus("ok", "Online");
+    setApiStatus("ok", "ONLINE");
   } catch {
-    setApiStatus("error", "Offline");
+    setApiStatus("error", "OFFLINE");
   }
 }
 
-$("pickImages").addEventListener(
-  "click",
-  () => imageInput.click()
-);
+$("pickImages").onclick = () =>
+  imageInput.click();
 
-$("pickVideos").addEventListener(
-  "click",
-  () => videoInput.click()
-);
+$("pickVideos").onclick = () =>
+  videoInput.click();
 
-imageInput.addEventListener(
-  "change",
-  () => {
-    addFiles(imageInput.files);
-    imageInput.value = "";
-  }
-);
+imageInput.onchange = () => {
+  addFiles(imageInput.files);
+  imageInput.value = "";
+};
 
-videoInput.addEventListener(
-  "change",
-  () => {
-    addFiles(videoInput.files);
-    videoInput.value = "";
-  }
-);
+videoInput.onchange = () => {
+  addFiles(videoInput.files);
+  videoInput.value = "";
+};
 
-dropzone.addEventListener(
-  "dragover",
-  (event) => {
-    event.preventDefault();
-    dropzone.classList.add("dragging");
-  }
-);
+dropzone.ondragover = (event) => {
+  event.preventDefault();
+  dropzone.classList.add("dragging");
+};
 
-dropzone.addEventListener(
-  "dragleave",
-  () => {
-    dropzone.classList.remove("dragging");
-  }
-);
+dropzone.ondragleave = () => {
+  dropzone.classList.remove("dragging");
+};
 
-dropzone.addEventListener(
-  "drop",
-  (event) => {
-    event.preventDefault();
-    dropzone.classList.remove("dragging");
+dropzone.ondrop = (event) => {
+  event.preventDefault();
+  dropzone.classList.remove("dragging");
+  addFiles(event.dataTransfer.files);
+};
 
-    addFiles(event.dataTransfer.files);
-  }
-);
-
-dropzone.addEventListener(
-  "keydown",
-  (event) => {
-    if (
-      event.key === "Enter" ||
-      event.key === " "
-    ) {
-      event.preventDefault();
-      imageInput.click();
-    }
-  }
-);
-
-sendBtn.addEventListener(
-  "click",
-  sendAll
-);
-
-clearBtn.addEventListener(
-  "click",
-  clearAll
-);
+sendBtn.onclick = sendAll;
+clearBtn.onclick = clearAll;
 
 window.addEventListener(
   "beforeunload",
@@ -725,7 +723,4 @@ renderPackButtons();
 updateStats();
 checkHealth();
 
-setInterval(
-  checkHealth,
-  30000
-);
+setInterval(checkHealth, 30000);
