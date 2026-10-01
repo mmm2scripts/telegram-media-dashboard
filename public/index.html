@@ -4,34 +4,63 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="robots" content="noindex">
-  <title>Telegram Media Dashboard</title>
+  <title>Telegram Media</title>
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
   <header class="top">
-    <h1>Telegram Media Dashboard</h1>
-    <span id="apiStatus" class="pill pill-wait" role="status">Checking connection…</span>
+    <div>
+      <h1>Telegram Media</h1>
+      <p class="muted">Upload and send media to Telegram</p>
+    </div>
+    <span id="apiStatus" class="pill pill-wait" role="status">Checking…</span>
   </header>
 
   <main>
     <section id="dropzone" class="dropzone" tabindex="0" aria-label="Add files">
-      <p class="dz-title">Drop images and videos here</p>
-      <p class="muted">You can also pick files from your device.</p>
+      <div class="upload-icon">+</div>
+      <h2>Drop your media here</h2>
+      <p class="muted">Images and videos</p>
+
       <div class="row">
-        <button type="button" class="btn" id="pickImages">Select images</button>
-        <button type="button" class="btn" id="pickVideos">Select videos</button>
+        <button type="button" class="btn" id="pickImages">Photos</button>
+        <button type="button" class="btn" id="pickVideos">Videos</button>
       </div>
+
       <input id="imageInput" type="file" accept="image/*" multiple hidden>
       <input id="videoInput" type="file" accept="video/*" multiple hidden>
     </section>
 
     <section class="stats" aria-label="Summary">
-      <div><span class="k">Files</span><strong id="statFiles">0</strong></div>
-      <div><span class="k">Total size</span><strong id="statSize">0 B</strong></div>
-      <div><span class="k">Pack size</span><strong id="statPackSize">10</strong></div>
-      <div><span class="k">Packs</span><strong id="statPacks">0</strong></div>
-      <div><span class="k">Current pack</span><strong id="statCurrent">–</strong></div>
-      <div><span class="k">Files sent</span><strong id="statSent">0 / 0</strong></div>
+      <div>
+        <span class="k">Files</span>
+        <strong id="statFiles">0</strong>
+      </div>
+
+      <div>
+        <span class="k">Size</span>
+        <strong id="statSize">0 B</strong>
+      </div>
+
+      <div>
+        <span class="k">Pack</span>
+        <strong id="statPackSize">10</strong>
+      </div>
+
+      <div>
+        <span class="k">Packs</span>
+        <strong id="statPacks">0</strong>
+      </div>
+
+      <div>
+        <span class="k">Current</span>
+        <strong id="statCurrent">–</strong>
+      </div>
+
+      <div>
+        <span class="k">Sent</span>
+        <strong id="statSent">0 / 0</strong>
+      </div>
     </section>
 
     <section class="panel">
@@ -39,21 +68,52 @@
         <span class="label" id="packLabel">Files per pack</span>
         <div id="packSizes" class="seg" role="group" aria-labelledby="packLabel"></div>
       </div>
+
       <div class="field">
-        <label class="label" for="caption">Caption (optional, added to the first item of each pack)</label>
-        <textarea id="caption" rows="2" maxlength="1024" placeholder="Write a caption…"></textarea>
+        <label class="label" for="caption">
+          Caption
+        </label>
+
+        <textarea
+          id="caption"
+          rows="2"
+          maxlength="1024"
+          placeholder="Optional caption…"
+        ></textarea>
       </div>
     </section>
 
     <section id="packs" class="packs" aria-live="polite"></section>
 
     <section class="panel">
-      <div class="bar" aria-hidden="true"><div id="barFill" class="bar-fill"></div></div>
-      <p id="progressText" class="muted">Nothing is being sent.</p>
+      <div class="bar" aria-hidden="true">
+        <div id="barFill" class="bar-fill"></div>
+      </div>
+
+      <p id="progressText" class="muted">
+        Nothing is being sent.
+      </p>
+
       <p id="message" class="message" role="status" hidden></p>
-      <div class="row">
-        <button type="button" class="btn btn-primary" id="sendBtn" disabled>Send to Telegram</button>
-        <button type="button" class="btn" id="clearBtn" disabled>Clear all</button>
+
+      <div class="row actions">
+        <button
+          type="button"
+          class="btn btn-primary"
+          id="sendBtn"
+          disabled
+        >
+          Send to Telegram
+        </button>
+
+        <button
+          type="button"
+          class="btn"
+          id="clearBtn"
+          disabled
+        >
+          Clear all
+        </button>
       </div>
     </section>
   </main>
