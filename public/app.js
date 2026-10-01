@@ -1,246 +1,731 @@
-/* =====================================================================
-   CONFIGURATION — EDIT THIS SECTION
-   ===================================================================== */
-
-// 1) Where the API lives.
-//    ""  (empty) = same site. Correct when you deploy with `npx wrangler deploy` (default).
-//    Only if the website is hosted somewhere else (e.g. Cloudflare Pages), put the Worker URL
-//    here, with no trailing slash:  "https://YOUR-WORKER.workers.dev"
-const WORKER_URL = "";
-
-// 2) Limits (keep them in sync with your Worker / bot server settings).
-const DEFAULT_PACK_SIZE = 10;  // 5–10
-const MAX_FILES_TOTAL   = 500; // files you can queue in the browser
-const MAX_FILE_MB       = 50;  // per file (Telegram bot upload limit)
-const PHOTO_MAX_MB      = 10;  // Telegram photo limit
-const MAX_REQUEST_MB    = 95;  // one pack = one request; Cloudflare allows 100 MB (Free/Pro)
-
-/* ===================================================================== */
-
 "use strict";
-const MB = 1024 * 1024;
-const PACK_SIZES = [5, 6, 7, 8, 9, 10];
-const $ = (id) => document.getElementById(id);
-const els = {
-  api: $("apiStatus"), drop: $("dropzone"), imgIn: $("imageInput"), vidIn: $("videoInput"),
-  files: $("statFiles"), size: $("statSize"), psize: $("statPackSize"), packsN: $("statPacks"),
-  current: $("statCurrent"), sent: $("statSent"), sizes: $("packSizes"), caption: $("caption"),
-  packs: $("packs"), bar: $("barFill"), progress: $("progressText"), msg: $("message"),
-  send: $("sendBtn"), clear: $("clearBtn"),
-};
+
+const WORKER_URL = "";
+const DEFAULT_PACK_SIZE = 10;
+
+const MAX_FILES_TOTAL = 500;
+const MAX_FILE_MB = 50;
+const PHOTO_MAX_MB = 10;
+const MAX_REQUEST_MB = 95;
+
+const PACK_OPTIONS = [5, 10];
+
 const state = {
-  items: [], packSize: PACK_SIZES.includes(DEFAULT_PACK_SIZE) ? DEFAULT_PACK_SIZE : 10,
-  busy: false, nextId: 1, dragId: null, job: null,
+  items: [],
+  packSize: DEFAULT_PACK_SIZE,
+  sending: false,
+  sent: 0,
+  currentPack: 0,
+  objectUrls: new Set(),
+  previewObserver: null
 };
 
-const workerConfigured = () => WORKER_URL === "" || (/^https?:\/\//.test(WORKER_URL) && !WORKER_URL.includes("YOUR-WORKER"));
-const apiBase = () => WORKER_URL.replace(/\/+$/, "");
+const $ = (id) => document.getElementById(id);
 
-function fmtSize(b) {
-  if (b < 1024) return `${b} B`;
-  const u = ["KB", "MB", "GB", "TB"]; let i = -1;
-  do { b /= 1024; i++; } while (b >= 1024 && i < u.length - 1);
-  return `${b.toFixed(b >= 100 ? 0 : 1)} ${u[i]}`;
+const dropzone = $("dropzone");
+const imageInput = $("imageInput");
+const videoInput = $("videoInput");
+const packsEl = $("packs");
+const sendBtn = $("sendBtn");
+const clearBtn = $("clearBtn");
+const captionEl = $("caption");
+const apiStatus = $("apiStatus");
+
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes <= 0) return "0 B";
+
+  const units = ["B", "KB", "MB", "GB"];
+  const index = Math.min(
+    Math.floor(Math.log(bytes) / Math.log(1024)),
+    units.length - 1
+  );
+
+  return `${(bytes / Math.pow(1024, index)).toFixed(
+    index === 0 ? 0 : 1
+  )} ${units[index]}`;
 }
-const chunk = (a, n) => { const o = []; for (let i = 0; i < a.length; i += n) o.push(a.slice(i, i + n)); return o; };
-const sum = (items) => items.reduce((s, i) => s + i.file.size, 0);
 
 function setMessage(type, text) {
-  els.msg.hidden = !text;
-  els.msg.className = "message" + (type ? " " + type : "");
-  els.msg.textContent = text || "";
-}
-function setApi(kind, text) { els.api.className = `pill pill-${kind}`; els.api.textContent = text; }
+  const el = $("message");
 
-/* ---------- API health ---------- */
-async function checkApi() {
-  if (!workerConfigured()) return setApi("warn", "Set WORKER_URL in app.js");
-  try {
-    const r = await fetch(`${apiBase()}/api/health`, { signal: AbortSignal.timeout(8000) });
-    const d = await r.json().catch(() => null);
-    if (r.ok && d && d.ok) setApi("ok", "Connected");
-    else if (d && d.worker) setApi("warn", "API up, bot server unreachable");
-    else setApi("bad", "API error");
-  } catch { setApi("bad", "API unreachable"); }
-}
-
-/* ---------- Adding / removing files ---------- */
-function addFiles(list) {
-  if (state.busy) return;
-  state.job = null;
-  const problems = [];
-  for (const file of list) {
-    const img = file.type.startsWith("image/"), vid = file.type.startsWith("video/");
-    if (!img && !vid) { problems.push(`${file.name}: not an image or video`); continue; }
-    if (file.size > MAX_FILE_MB * MB) { problems.push(`${file.name}: larger than ${MAX_FILE_MB} MB`); continue; }
-    if (img && file.size > PHOTO_MAX_MB * MB) { problems.push(`${file.name}: images must be ${PHOTO_MAX_MB} MB or smaller`); continue; }
-    if (state.items.length >= MAX_FILES_TOTAL) { problems.push(`Limit of ${MAX_FILES_TOTAL} files reached`); break; }
-    if (state.items.some((i) => i.file.name === file.name && i.file.size === file.size && i.file.lastModified === file.lastModified)) continue;
-    state.items.push({ id: state.nextId++, file, kind: img ? "image" : "video", url: URL.createObjectURL(file), thumb: null });
+  if (!text) {
+    el.hidden = true;
+    el.textContent = "";
+    el.className = "message";
+    return;
   }
-  setMessage(problems.length ? "error" : "", problems.length ? "Some files were skipped:\n" + problems.slice(0, 8).join("\n") + (problems.length > 8 ? `\n…and ${problems.length - 8} more` : "") : "");
-  render();
-}
-function dropItem(item) { URL.revokeObjectURL(item.url); state.items = state.items.filter((i) => i !== item); }
-function removeItem(id) { const it = state.items.find((i) => i.id === id); if (it && !state.busy) { dropItem(it); render(); } }
-function clearAll() { if (state.busy) return; [...state.items].forEach(dropItem); state.job = null; setMessage("", ""); setProgress(0, "Nothing is being sent."); render(); }
-function moveItem(fromIdx, toIdx) {
-  if (state.busy || fromIdx === toIdx || toIdx < 0 || toIdx >= state.items.length) return;
-  const [it] = state.items.splice(fromIdx, 1); state.items.splice(toIdx, 0, it); render();
+
+  el.hidden = false;
+  el.textContent = text;
+  el.className = `message ${type || ""}`;
 }
 
-/* ---------- Rendering ---------- */
-function thumbFor(item) {
-  if (item.thumb) return item.thumb;
-  const box = document.createElement("div"); box.className = "thumb";
-  if (item.kind === "image") {
-    const img = document.createElement("img"); img.src = item.url; img.alt = ""; img.loading = "lazy"; img.draggable = false; box.append(img);
-  } else {
-    const v = document.createElement("video"); v.src = item.url + "#t=0.1"; v.preload = "metadata"; v.muted = true; v.playsInline = true; v.draggable = false; box.append(v);
+function setApiStatus(type, text) {
+  apiStatus.textContent = text;
+  apiStatus.className = `pill pill-${type}`;
+}
+
+function createObjectUrl(file) {
+  const url = URL.createObjectURL(file);
+  state.objectUrls.add(url);
+  return url;
+}
+
+function revokeObjectUrls() {
+  for (const url of state.objectUrls) {
+    URL.revokeObjectURL(url);
   }
-  const b = document.createElement("span"); b.className = "badge"; b.textContent = item.kind === "image" ? "Image" : "Video"; box.append(b);
-  return (item.thumb = box);
+
+  state.objectUrls.clear();
 }
-function toolBtn(label, text, disabled, fn) {
-  const b = document.createElement("button"); b.type = "button"; b.textContent = text; b.title = label; b.setAttribute("aria-label", label);
-  b.disabled = disabled; b.addEventListener("click", fn); return b;
-}
-function renderCard(item, idx) {
-  const card = document.createElement("div"); card.className = "card"; card.draggable = !state.busy;
-  card.append(thumbFor(item));
-  const meta = document.createElement("div"); meta.className = "meta";
-  const n = document.createElement("div"); n.className = "name"; n.textContent = item.file.name; n.title = item.file.name;
-  const s = document.createElement("div"); s.className = "size"; s.textContent = fmtSize(item.file.size);
-  meta.append(n, s);
-  const tools = document.createElement("div"); tools.className = "tools";
-  tools.append(
-    toolBtn("Move earlier", "◀", state.busy || idx === 0, () => moveItem(idx, idx - 1)),
-    toolBtn("Move later", "▶", state.busy || idx === state.items.length - 1, () => moveItem(idx, idx + 1)),
-    toolBtn("Remove file", "✕", state.busy, () => removeItem(item.id)),
+
+function updateStats() {
+  const totalSize = state.items.reduce(
+    (sum, item) => sum + item.file.size,
+    0
   );
-  card.append(meta, tools);
-  card.addEventListener("dragstart", (e) => { state.dragId = item.id; e.dataTransfer.setData("text/plain", String(item.id)); e.dataTransfer.effectAllowed = "move"; card.classList.add("dragging"); });
-  card.addEventListener("dragend", () => { state.dragId = null; card.classList.remove("dragging"); });
-  card.addEventListener("dragover", (e) => { if (state.dragId !== null) e.preventDefault(); });
-  card.addEventListener("drop", (e) => {
-    if (state.dragId === null) return;
-    e.preventDefault(); e.stopPropagation();
-    const from = state.items.findIndex((i) => i.id === state.dragId), to = state.items.findIndex((i) => i.id === item.id);
-    state.dragId = null; moveItem(from, to);
+
+  const packCount = state.items.length
+    ? Math.ceil(state.items.length / state.packSize)
+    : 0;
+
+  $("statFiles").textContent = state.items.length;
+  $("statSize").textContent = formatBytes(totalSize);
+  $("statPackSize").textContent = state.packSize;
+  $("statPacks").textContent = packCount;
+  $("statCurrent").textContent = state.currentPack
+    ? `${state.currentPack} / ${packCount}`
+    : "–";
+  $("statSent").textContent = `${state.sent} / ${state.items.length}`;
+
+  sendBtn.disabled = state.items.length === 0 || state.sending;
+  clearBtn.disabled = state.items.length === 0 || state.sending;
+}
+
+function createPackButton(size) {
+  const button = document.createElement("button");
+  button.type = "button";
+  button.textContent = size;
+  button.className = size === state.packSize ? "active" : "";
+
+  button.addEventListener("click", () => {
+    if (state.sending) return;
+
+    state.packSize = size;
+    renderPackButtons();
+    renderPacks();
+    updateStats();
   });
-  return card;
+
+  return button;
 }
-function render() {
-  const n = state.items.length, packs = chunk(state.items, state.packSize);
-  els.files.textContent = n; els.size.textContent = fmtSize(sum(state.items));
-  els.psize.textContent = state.packSize; els.packsN.textContent = packs.length;
-  els.current.textContent = state.job && state.busy ? `${state.job.pack} / ${state.job.totalPacks}` : "–";
-  els.sent.textContent = state.job ? `${state.job.sent} / ${state.job.totalFiles}` : `0 / ${n}`;
-  els.send.disabled = state.busy || n === 0; els.clear.disabled = state.busy || n === 0;
-  els.caption.disabled = state.busy;
 
-  els.sizes.replaceChildren(...PACK_SIZES.map((v) => {
-    const b = document.createElement("button"); b.type = "button"; b.textContent = v; b.disabled = state.busy;
-    b.setAttribute("aria-pressed", String(v === state.packSize));
-    b.addEventListener("click", () => { state.packSize = v; render(); });
-    return b;
-  }));
+function renderPackButtons() {
+  const container = $("packSizes");
+  container.replaceChildren();
 
-  if (!n) {
-    const p = document.createElement("p"); p.className = "muted empty"; p.textContent = "No files yet. Add images or videos above.";
-    els.packs.replaceChildren(p); return;
+  for (const size of PACK_OPTIONS) {
+    container.appendChild(createPackButton(size));
   }
-  els.packs.replaceChildren(...packs.map((pack, pi) => {
-    const sec = document.createElement("div");
-    sec.className = "pack" + (pi % 2 ? " alt" : "") + (state.busy && state.job && pi === 0 ? " active" : "");
-    const head = document.createElement("div"); head.className = "pack-head";
-    const a = document.createElement("span"); a.textContent = `Pack ${pi + 1}`;
-    const b = document.createElement("span"); b.textContent = `${pack.length} file${pack.length > 1 ? "s" : ""}, ${fmtSize(sum(pack))}`;
-    head.append(a, b);
-    const grid = document.createElement("div"); grid.className = "grid";
-    pack.forEach((it, k) => grid.append(renderCard(it, pi * state.packSize + k)));
-    sec.append(head, grid); return sec;
-  }));
 }
-function setProgress(pct, text) { els.bar.style.width = `${Math.max(0, Math.min(100, pct))}%`; els.progress.textContent = text; }
 
-/* ---------- Upload ---------- */
-function uploadPack(pack, caption, onProgress) {
-  return new Promise((resolve, reject) => {
-    const fd = new FormData();
-    fd.append("packSize", String(state.packSize));
-    if (caption) fd.append("caption", caption);
-    pack.forEach((it) => fd.append("files", it.file, it.file.name));
-    const xhr = new XMLHttpRequest();
-    xhr.open("POST", `${apiBase()}/api/send-media?packSize=${state.packSize}`);
-    xhr.responseType = "json";
-    xhr.upload.onprogress = (e) => e.lengthComputable && onProgress(e.loaded, false);
-    xhr.upload.onload = () => onProgress(null, true);
-    xhr.onerror = () => reject(new Error("Network error: could not reach the API."));
-    xhr.onabort = () => reject(new Error("Upload cancelled."));
-    xhr.onload = () => {
-      const d = xhr.response;
-      if (xhr.status >= 200 && xhr.status < 300 && d && d.ok) resolve(d);
-      else reject(new Error((d && d.error) || `Server returned HTTP ${xhr.status}.`));
+function createPreviewBox(item) {
+  const box = document.createElement("div");
+  box.className = "media-card";
+  box.dataset.previewId = item.id;
+
+  const placeholder = document.createElement("div");
+  placeholder.className = "preview-placeholder";
+  placeholder.textContent = item.type === "video"
+    ? "Video"
+    : "Image";
+
+  box.appendChild(placeholder);
+
+  const badge = document.createElement("div");
+  badge.className = "type-badge";
+  badge.textContent = item.type === "video" ? "VIDEO" : "PHOTO";
+
+  box.appendChild(badge);
+
+  const name = document.createElement("div");
+  name.className = "media-name";
+  name.textContent = item.file.name;
+
+  box.appendChild(name);
+
+  return box;
+}
+
+function loadPreview(box, item) {
+  if (!box || box.dataset.loaded === "true") return;
+
+  box.dataset.loaded = "true";
+
+  const placeholder = box.querySelector(".preview-placeholder");
+  const badge = box.querySelector(".type-badge");
+
+  if (item.type === "image") {
+    const img = new Image();
+
+    img.alt = item.file.name;
+    img.decoding = "async";
+    img.loading = "lazy";
+
+    img.onload = () => {
+      placeholder?.remove();
     };
-    xhr.send(fd);
+
+    img.onerror = () => {
+      if (placeholder) {
+        placeholder.textContent = "Preview unavailable";
+      }
+    };
+
+    img.src = item.url;
+
+    if (badge) {
+      box.insertBefore(img, badge);
+    } else {
+      box.appendChild(img);
+    }
+
+    return;
+  }
+
+  const video = document.createElement("video");
+
+  video.muted = true;
+  video.playsInline = true;
+  video.preload = "metadata";
+
+  video.addEventListener(
+    "loadeddata",
+    () => {
+      placeholder?.remove();
+    },
+    { once: true }
+  );
+
+  video.addEventListener(
+    "error",
+    () => {
+      if (placeholder) {
+        placeholder.textContent = "Preview unavailable";
+      }
+    },
+    { once: true }
+  );
+
+  video.src = item.url;
+  video.currentTime = 0.1;
+
+  if (badge) {
+    box.insertBefore(video, badge);
+  } else {
+    box.appendChild(video);
+  }
+}
+
+function setupPreviewObserver() {
+  if (state.previewObserver) {
+    state.previewObserver.disconnect();
+  }
+
+  if (!("IntersectionObserver" in window)) {
+    document
+      .querySelectorAll(".media-card[data-preview-id]")
+      .forEach((box) => {
+        const item = state.items.find(
+          (entry) => entry.id === box.dataset.previewId
+        );
+
+        if (item) {
+          loadPreview(box, item);
+        }
+      });
+
+    return;
+  }
+
+  state.previewObserver = new IntersectionObserver(
+    (entries, observer) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+
+        const box = entry.target;
+
+        const item = state.items.find(
+          (entryItem) => entryItem.id === box.dataset.previewId
+        );
+
+        if (item) {
+          loadPreview(box, item);
+        }
+
+        observer.unobserve(box);
+      }
+    },
+    {
+      rootMargin: "300px 0px"
+    }
+  );
+
+  document
+    .querySelectorAll(".media-card[data-preview-id]")
+    .forEach((box) => state.previewObserver.observe(box));
+}
+
+function renderPacks() {
+  if (state.previewObserver) {
+    state.previewObserver.disconnect();
+  }
+
+  packsEl.replaceChildren();
+
+  if (!state.items.length) {
+    return;
+  }
+
+  const packCount = Math.ceil(
+    state.items.length / state.packSize
+  );
+
+  for (let packIndex = 0; packIndex < packCount; packIndex++) {
+    const start = packIndex * state.packSize;
+    const items = state.items.slice(
+      start,
+      start + state.packSize
+    );
+
+    const pack = document.createElement("article");
+    pack.className = "pack";
+
+    const head = document.createElement("div");
+    head.className = "pack-head";
+
+    const title = document.createElement("span");
+    title.className = "pack-title";
+    title.textContent = `Pack ${packIndex + 1}`;
+
+    const status = document.createElement("span");
+    status.className = "pack-status";
+    status.textContent = `${items.length} file${
+      items.length === 1 ? "" : "s"
+    }`;
+
+    head.appendChild(title);
+    head.appendChild(status);
+
+    const itemsEl = document.createElement("div");
+    itemsEl.className = "pack-items";
+
+    for (const item of items) {
+      itemsEl.appendChild(createPreviewBox(item));
+    }
+
+    pack.appendChild(head);
+    pack.appendChild(itemsEl);
+    packsEl.appendChild(pack);
+  }
+
+  setupPreviewObserver();
+}
+
+function isAllowedFile(file) {
+  return (
+    file &&
+    (
+      file.type.startsWith("image/") ||
+      file.type.startsWith("video/")
+    )
+  );
+}
+
+function addFiles(fileList) {
+  if (state.sending) return;
+
+  const files = Array.from(fileList || []);
+
+  if (!files.length) return;
+
+  const problems = [];
+
+  for (const file of files) {
+    if (state.items.length >= MAX_FILES_TOTAL) {
+      problems.push(`Maximum of ${MAX_FILES_TOTAL} files reached.`);
+      break;
+    }
+
+    if (!isAllowedFile(file)) {
+      problems.push(`${file.name}: unsupported file type.`);
+      continue;
+    }
+
+    const maxMb = file.type.startsWith("image/")
+      ? PHOTO_MAX_MB
+      : MAX_FILE_MB;
+
+    if (file.size > maxMb * 1024 * 1024) {
+      problems.push(
+        `${file.name}: larger than ${maxMb} MB.`
+      );
+      continue;
+    }
+
+    const item = {
+      id: crypto.randomUUID
+        ? crypto.randomUUID()
+        : `${Date.now()}-${Math.random()}`,
+      file,
+      type: file.type.startsWith("video/")
+        ? "video"
+        : "image",
+      url: createObjectUrl(file)
+    };
+
+    state.items.push(item);
+  }
+
+  if (problems.length) {
+    setMessage(
+      "error",
+      `Some files were skipped:\n${problems.join("\n")}`
+    );
+  } else {
+    setMessage("", "");
+  }
+
+  state.sent = 0;
+  state.currentPack = 0;
+
+  renderPacks();
+  updateStats();
+}
+
+function clearAll() {
+  if (state.sending) return;
+
+  revokeObjectUrls();
+
+  state.items = [];
+  state.sent = 0;
+  state.currentPack = 0;
+
+  renderPacks();
+  updateStats();
+
+  $("progressText").textContent =
+    "Nothing is being sent.";
+
+  $("barFill").style.width = "0%";
+
+  setMessage("", "");
+}
+
+function getPacks() {
+  const packs = [];
+
+  for (
+    let i = 0;
+    i < state.items.length;
+    i += state.packSize
+  ) {
+    packs.push(
+      state.items.slice(i, i + state.packSize)
+    );
+  }
+
+  return packs;
+}
+
+function updatePackStatus(packIndex, text) {
+  const packs = packsEl.querySelectorAll(".pack");
+
+  if (packs[packIndex]) {
+    const status =
+      packs[packIndex].querySelector(".pack-status");
+
+    if (status) {
+      status.textContent = text;
+    }
+  }
+}
+
+function sendPack(pack, packIndex, totalPacks) {
+  return new Promise((resolve, reject) => {
+    const form = new FormData();
+
+    for (const item of pack) {
+      form.append("files", item.file, item.file.name);
+    }
+
+    form.append("packSize", String(pack.length));
+    form.append("packIndex", String(packIndex + 1));
+    form.append("totalPacks", String(totalPacks));
+
+    if (packIndex === 0 || captionEl.value.trim()) {
+      form.append("caption", captionEl.value.trim());
+    }
+
+    const xhr = new XMLHttpRequest();
+
+    xhr.open(
+      "POST",
+      `${WORKER_URL}/api/send-media?packSize=${encodeURIComponent(
+        pack.length
+      )}`
+    );
+
+    xhr.responseType = "json";
+
+    xhr.upload.onprogress = (event) => {
+      if (!event.lengthComputable) return;
+
+      const packProgress =
+        event.loaded / event.total;
+
+      const completedBefore = packIndex * state.packSize;
+
+      const overall =
+        (
+          (completedBefore +
+            packProgress * pack.length) /
+          state.items.length
+        ) * 100;
+
+      $("barFill").style.width =
+        `${Math.min(100, overall)}%`;
+
+      $("progressText").textContent =
+        `Sending pack ${packIndex + 1} of ${totalPacks}…`;
+    };
+
+    xhr.onload = () => {
+      let response = xhr.response;
+
+      if (!response && xhr.responseText) {
+        try {
+          response = JSON.parse(xhr.responseText);
+        } catch {
+          response = null;
+        }
+      }
+
+      if (
+        xhr.status >= 200 &&
+        xhr.status < 300 &&
+        response &&
+        response.ok !== false
+      ) {
+        resolve(response);
+        return;
+      }
+
+      reject(
+        new Error(
+          response?.error ||
+          response?.message ||
+          `Server returned HTTP ${xhr.status}`
+        )
+      );
+    };
+
+    xhr.onerror = () => {
+      reject(new Error("Network error while sending."));
+    };
+
+    xhr.ontimeout = () => {
+      reject(new Error("Request timed out."));
+    };
+
+    xhr.timeout = 10 * 60 * 1000;
+
+    xhr.send(form);
   });
 }
 
-async function send() {
-  if (state.busy || !state.items.length) return;
-  if (!workerConfigured()) return setMessage("error", "WORKER_URL in public/app.js is invalid. Use an empty string (same site) or your full Worker URL.");
-  const caption = els.caption.value.trim();
-  const packs = chunk([...state.items], state.packSize);
-  const big = packs.findIndex((p) => sum(p) > MAX_REQUEST_MB * MB);
-  if (big !== -1) return setMessage("error", `Pack ${big + 1} is ${fmtSize(sum(packs[big]))}, above the ${MAX_REQUEST_MB} MB per-request limit.\nChoose a smaller pack size or remove some large files.`);
-
-  const totalBytes = sum(state.items);
-  state.busy = true;
-  state.job = { pack: 1, totalPacks: packs.length, sent: 0, totalFiles: state.items.length };
-  setMessage("", ""); render();
-  let doneBytes = 0;
-
-  for (let i = 0; i < packs.length; i++) {
-    const pack = packs[i], bytes = sum(pack);
-    state.job.pack = i + 1; render();
-    try {
-      await uploadPack(pack, caption, (loaded, finished) => {
-        const now = finished ? bytes : loaded;
-        const label = finished ? "Telegram is processing" : "Uploading";
-        setProgress(((doneBytes + now) / totalBytes) * 100, `${label} pack ${i + 1} of ${packs.length} · ${state.job.sent} / ${state.job.totalFiles} files sent`);
-      });
-    } catch (err) {
-      state.busy = false; render();
-      setProgress(((doneBytes) / totalBytes) * 100, `Stopped at pack ${i + 1} of ${packs.length} · ${state.job.sent} / ${state.job.totalFiles} files sent`);
-      return setMessage("error", `${err.message}\n${state.job.sent} of ${state.job.totalFiles} files were sent. Sent files were removed from the list; press Send again to continue with the rest.`);
-    }
-    doneBytes += bytes; state.job.sent += pack.length;
-    pack.forEach(dropItem);
+async function sendAll() {
+  if (
+    state.sending ||
+    !state.items.length
+  ) {
+    return;
   }
-  state.busy = false; render();
-  setProgress(100, `Done · ${state.job.sent} / ${state.job.totalFiles} files sent`);
-  setMessage("ok", `Success: ${state.job.sent} files sent in ${state.job.totalPacks} pack${state.job.totalPacks > 1 ? "s" : ""}.`);
+
+  state.sending = true;
+  state.sent = 0;
+  state.currentPack = 0;
+
+  sendBtn.disabled = true;
+  clearBtn.disabled = true;
+
+  setMessage("", "");
+
+  const packs = getPacks();
+
+  try {
+    for (
+      let index = 0;
+      index < packs.length;
+      index++
+    ) {
+      state.currentPack = index + 1;
+
+      updateStats();
+      updatePackStatus(
+        index,
+        "Sending…"
+      );
+
+      await sendPack(
+        packs[index],
+        index,
+        packs.length
+      );
+
+      state.sent += packs[index].length;
+
+      updatePackStatus(
+        index,
+        "Sent"
+      );
+
+      updateStats();
+
+      const progress =
+        (state.sent / state.items.length) * 100;
+
+      $("barFill").style.width =
+        `${progress}%`;
+    }
+
+    $("progressText").textContent =
+      `Sent ${state.sent} files successfully.`;
+
+    setMessage(
+      "success",
+      "All files were sent successfully."
+    );
+  } catch (error) {
+    $("progressText").textContent =
+      `Stopped after ${state.sent} files.`;
+
+    setMessage(
+      "error",
+      error?.message ||
+        "Something went wrong while sending."
+    );
+  } finally {
+    state.sending = false;
+    updateStats();
+  }
 }
 
-/* ---------- Events ---------- */
-$("pickImages").addEventListener("click", () => els.imgIn.click());
-$("pickVideos").addEventListener("click", () => els.vidIn.click());
-for (const input of [els.imgIn, els.vidIn]) input.addEventListener("change", () => { addFiles([...input.files]); input.value = ""; });
-els.send.addEventListener("click", send);
-els.clear.addEventListener("click", clearAll);
-els.drop.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); els.imgIn.click(); } });
+async function checkHealth() {
+  try {
+    const response = await fetch(
+      `${WORKER_URL}/api/health`,
+      {
+        method: "GET",
+        cache: "no-store"
+      }
+    );
 
-const hasFiles = (e) => e.dataTransfer && [...e.dataTransfer.types].includes("Files");
-window.addEventListener("dragover", (e) => { if (hasFiles(e)) { e.preventDefault(); els.drop.classList.add("over"); } });
-window.addEventListener("dragleave", (e) => { if (!e.relatedTarget) els.drop.classList.remove("over"); });
-window.addEventListener("drop", (e) => {
-  if (!hasFiles(e)) return;
-  e.preventDefault(); els.drop.classList.remove("over");
-  if (!state.busy) addFiles([...e.dataTransfer.files]);
-});
-window.addEventListener("beforeunload", (e) => { if (state.busy) { e.preventDefault(); e.returnValue = ""; } });
+    if (!response.ok) {
+      throw new Error();
+    }
 
-render();
-checkApi();
-setInterval(checkApi, 30000);
+    setApiStatus("ok", "Online");
+  } catch {
+    setApiStatus("error", "Offline");
+  }
+}
+
+$("pickImages").addEventListener(
+  "click",
+  () => imageInput.click()
+);
+
+$("pickVideos").addEventListener(
+  "click",
+  () => videoInput.click()
+);
+
+imageInput.addEventListener(
+  "change",
+  () => {
+    addFiles(imageInput.files);
+    imageInput.value = "";
+  }
+);
+
+videoInput.addEventListener(
+  "change",
+  () => {
+    addFiles(videoInput.files);
+    videoInput.value = "";
+  }
+);
+
+dropzone.addEventListener(
+  "dragover",
+  (event) => {
+    event.preventDefault();
+    dropzone.classList.add("dragging");
+  }
+);
+
+dropzone.addEventListener(
+  "dragleave",
+  () => {
+    dropzone.classList.remove("dragging");
+  }
+);
+
+dropzone.addEventListener(
+  "drop",
+  (event) => {
+    event.preventDefault();
+    dropzone.classList.remove("dragging");
+
+    addFiles(event.dataTransfer.files);
+  }
+);
+
+dropzone.addEventListener(
+  "keydown",
+  (event) => {
+    if (
+      event.key === "Enter" ||
+      event.key === " "
+    ) {
+      event.preventDefault();
+      imageInput.click();
+    }
+  }
+);
+
+sendBtn.addEventListener(
+  "click",
+  sendAll
+);
+
+clearBtn.addEventListener(
+  "click",
+  clearAll
+);
+
+window.addEventListener(
+  "beforeunload",
+  revokeObjectUrls
+);
+
+renderPackButtons();
+updateStats();
+checkHealth();
+
+setInterval(
+  checkHealth,
+  30000
+);
