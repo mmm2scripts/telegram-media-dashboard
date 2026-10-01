@@ -1,6 +1,6 @@
 # One Worker serves BOTH the website (./public) and the API (/api/*).
 # Deploy with:  npx wrangler deploy
-name = "telegram-media-dashboard"
+name = "telegram-media-dashboar"
 main = "worker.js"
 compatibility_date = "2025-01-15"
 
